@@ -187,6 +187,29 @@ def generate_feature_table():
     print("\n--- Extraction Complete ---")
     
     df = pd.DataFrame(features_list)
+
+    feature_columns = [
+        "mean_r","mean_g","mean_b",
+        "color_variance",
+        "edge_density",
+        "symmetry_score",
+        "texture_entropy"
+    ]
+
+    stats = {}
+
+    for col in feature_columns:
+        stats[col] = {
+            "mean": float(df[col].mean()),
+            "std": float(df[col].std())
+        }
+
+    import json
+
+    os.makedirs("data/metadata", exist_ok=True)
+
+    with open("data/metadata/feature_stats.json","w") as f:
+        json.dump(stats,f,indent=4)
     
     print(f"Total Images Processed: {total_images}")
     print(f"Total Unique Classes: {len(unique_classes)}")

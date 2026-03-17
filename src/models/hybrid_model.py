@@ -85,12 +85,19 @@ class HybridDataset(Dataset):
         # This resolves outliers breaking downstream gradient layers mapping strictly to identical scales.
         # Note: In real production, parameters computed across train should apply identically 
         # against strictly isolated test structures.
+        # Load feature normalization statistics
+        with open("data/metadata/feature_stats.json") as f:
+            feature_stats = json.load(f)
+
         for col in self.feature_columns:
+
             if col in ["mean_r", "mean_g", "mean_b"]:
-                self.df[col] = self.df[col] / 255.0  # RGB Bounds inherently map (0 ~ 255) -> (0 ~ 1)
+                # RGB already bounded [0,255]
+                self.df[col] = self.df[col] / 255.0
             else:
-                mean_val = self.df[col].mean()
-                std_val = self.df[col].std()
+                mean_val = feature_stats[col]["mean"]
+                std_val = feature_stats[col]["std"]
+
                 if std_val > 0:
                     self.df[col] = (self.df[col] - mean_val) / std_val
                 
@@ -158,6 +165,9 @@ def evaluate_hybrid_model(model: nn.Module, val_loader: DataLoader) -> tuple:
     
     with torch.no_grad():
         for batch_features, batch_labels in val_loader:
+            batch_features = batch_features.to(next(model.parameters()).device)
+            batch_labels = batch_labels.to(next(model.parameters()).device)
+
             outputs = model(batch_features)
             loss = criterion(outputs, batch_labels)
             
@@ -225,6 +235,9 @@ def train_hybrid_model():
         running_loss = 0.0
         
         for batch_features, batch_labels in train_loader:
+            batch_features = batch_features.to(device)
+            batch_labels = batch_labels.to(device)
+
             optimizer.zero_grad()
             
             outputs = model(batch_features)
