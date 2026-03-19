@@ -1,24 +1,49 @@
 """
 Model training script for Indian traditional painting classification.
 
-This script manages the initialization of the PaintingClassifier model, the training loop,
-validation, and the saving of the best model state based on validation accuracy.
-Expected to be executed from the project root using: `python -m src.training.train`
+This script manages:
+- Dataset loading
+- Model training and validation
+- Metric tracking (loss & accuracy)
+- Saving best model checkpoint
+- Plotting training curves
+
+Run using:
+    python -m src.training.train
 """
 
 import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import matplotlib.pyplot as plt
 
 from src.dataset.dataset_loader import create_dataloader
 from src.models.cnn_model import PaintingClassifier
 
+
 def train_model():
     """
-    Sets up the dataset loaders, model, loss criterion, and optimizer, then executes 
-    a training loop for 10 epochs. Tracks accuracy and saves the best model natively.
+    Executes full training pipeline and saves metrics + plots.
     """
+
+    # ---------------------
+    # CREATE FOLDERS
+    # ---------------------
+    os.makedirs("models", exist_ok=True)
+    os.makedirs("experiments", exist_ok=True)
+
+    # ---------------------
+    # TRACK METRICS
+    # ---------------------
+    train_losses = []
+    val_losses = []
+    train_accuracies = []
+    val_accuracies = []
+
+    # ---------------------
+    # LOAD DATA
+    # ---------------------
     print("Loading datasets...")
     train_loader, val_loader = create_dataloader(
         root_dir="data/raw",
@@ -26,14 +51,20 @@ def train_model():
         batch_size=16,
         num_workers=0
     )
+
     print(f"Training samples: {len(train_loader.dataset)}")
     print(f"Validation samples: {len(val_loader.dataset)}")
 
-    # Allow processing on GPU natively if available
+    # ---------------------
+    # DEVICE
+    # ---------------------
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     torch.backends.cudnn.benchmark = True
     print(f"Using device: {device}")
 
+    # ---------------------
+    # MODEL
+    # ---------------------
     print("Initializing model...")
     model = PaintingClassifier(num_classes=8).to(device)
 
@@ -44,9 +75,14 @@ def train_model():
     best_val_acc = 0.0
 
     print("Starting training...")
+
+    # ---------------------
+    # TRAIN LOOP
+    # ---------------------
     for epoch in range(epochs):
+
         # ---------------------
-        # Training Phase
+        # TRAINING
         # ---------------------
         model.train()
         running_loss = 0.0
@@ -56,30 +92,28 @@ def train_model():
         for images, labels in train_loader:
             images, labels = images.to(device), labels.to(device)
 
-            # Zero gradients
             optimizer.zero_grad()
 
-            # Forward pass
             outputs = model(images)
             loss = criterion(outputs, labels)
 
-            # Backward pass & optimization
             loss.backward()
             optimizer.step()
 
-            # Track metrics
             running_loss += loss.item() * images.size(0)
+
             _, predicted = torch.max(outputs, 1)
             correct += (predicted == labels).sum().item()
             total += labels.size(0)
 
-        epoch_loss = running_loss / total
-        epoch_acc = (correct / total) * 100
+        epoch_train_loss = running_loss / total
+        epoch_train_acc = (correct / total) * 100
 
         # ---------------------
-        # Validation Phase
+        # VALIDATION
         # ---------------------
         model.eval()
+        val_loss = 0.0
         val_correct = 0
         val_total = 0
 
@@ -88,28 +122,72 @@ def train_model():
                 val_images, val_labels = val_images.to(device), val_labels.to(device)
 
                 val_outputs = model(val_images)
-                _, val_predictions = torch.max(val_outputs, 1)
+                loss = criterion(val_outputs, val_labels)
 
-                val_correct += (val_predictions == val_labels).sum().item()
+                val_loss += loss.item() * val_images.size(0)
+
+                _, val_predicted = torch.max(val_outputs, 1)
+                val_correct += (val_predicted == val_labels).sum().item()
                 val_total += val_labels.size(0)
 
-        # Avoid zero division if val_loader happens to be empty during early dev
-        val_acc = (val_correct / val_total) * 100 if val_total > 0 else 0.0
-
-        # Output formatting identically matching requested structural style
-        print(f"Epoch {epoch + 1}/{epochs} — Loss: {epoch_loss:.2f} — Accuracy: {epoch_acc:.1f}% (Val Acc: {val_acc:.1f}%)")
+        epoch_val_loss = val_loss / val_total
+        epoch_val_acc = (val_correct / val_total) * 100
 
         # ---------------------
-        # Checkpointing
+        # STORE METRICS
         # ---------------------
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
-            os.makedirs("models", exist_ok=True)
-            torch.save({
-                "model_state_dict": model.state_dict(),
-                "best_val_accuracy": best_val_acc
-            }, "models/painting_classifier.pth")
-            print("  [✓] Improved validation accuracy. Saved model checkpoint.")
+        train_losses.append(epoch_train_loss)
+        val_losses.append(epoch_val_loss)
+        train_accuracies.append(epoch_train_acc)
+        val_accuracies.append(epoch_val_acc)
 
+        print(f"Epoch {epoch+1}/{epochs} | "
+              f"Train Loss: {epoch_train_loss:.4f} | "
+              f"Train Acc: {epoch_train_acc:.2f}% | "
+              f"Val Loss: {epoch_val_loss:.4f} | "
+              f"Val Acc: {epoch_val_acc:.2f}%")
+
+        # ---------------------
+        # SAVE BEST MODEL
+        # ---------------------
+        if epoch_val_acc > best_val_acc:
+            best_val_acc = epoch_val_acc
+            torch.save(model.state_dict(), "models/cnn_classifier.pth")
+            print("  [✓] Best model saved")
+
+    # ---------------------
+    # PLOT CURVES
+    # ---------------------
+    epochs_range = range(1, epochs + 1)
+
+    # LOSS CURVE
+    plt.figure()
+    plt.plot(epochs_range, train_losses, label="Train Loss")
+    plt.plot(epochs_range, val_losses, label="Validation Loss")
+    plt.xlabel("Epochs")
+    plt.ylabel("Loss")
+    plt.title("Training vs Validation Loss")
+    plt.legend()
+    plt.savefig("experiments/loss_curve.png")
+    plt.show()
+
+    # ACCURACY CURVE
+    plt.figure()
+    plt.plot(epochs_range, train_accuracies, label="Train Accuracy")
+    plt.plot(epochs_range, val_accuracies, label="Validation Accuracy")
+    plt.xlabel("Epochs")
+    plt.ylabel("Accuracy (%)")
+    plt.title("Training vs Validation Accuracy")
+    plt.legend()
+    plt.savefig("experiments/accuracy_curve.png")
+    plt.show()
+
+    print("\nTraining complete.")
+    print("Plots saved in experiments/")
+
+
+# ---------------------
+# ENTRY POINT
+# ---------------------
 if __name__ == "__main__":
     train_model()
