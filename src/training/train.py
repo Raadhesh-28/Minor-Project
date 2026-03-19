@@ -20,6 +20,30 @@ import matplotlib.pyplot as plt
 
 from src.dataset.dataset_loader import create_dataloader
 from src.models.cnn_model import PaintingClassifier
+from sklearn.metrics import classification_report, confusion_matrix
+
+def evaluate_model(model, val_loader, device):
+    model.eval()
+    
+    all_preds = []
+    all_labels = []
+
+    with torch.no_grad():
+        for images, labels in val_loader:
+            images = images.to(device)
+            labels = labels.to(device)
+
+            outputs = model(images)
+            _, preds = torch.max(outputs, 1)
+
+            all_preds.extend(preds.cpu().numpy())
+            all_labels.extend(labels.cpu().numpy())
+
+    print("\n=== FINAL CLASSIFICATION REPORT ===\n")
+    print(classification_report(all_labels, all_preds))
+
+    print("\n=== CONFUSION MATRIX ===\n")
+    print(confusion_matrix(all_labels, all_preds))
 
 
 def train_model():
@@ -184,6 +208,9 @@ def train_model():
 
     print("\nTraining complete.")
     print("Plots saved in experiments/")
+
+    print("\nTraining complete. Running final evaluation...\n")
+    evaluate_model(model, val_loader, device)
 
 
 # ---------------------
